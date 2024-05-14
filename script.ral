@@ -1,0 +1,9 @@
+TxScript  mapEntryFees{
+    let caller=callerAddress!()
+    ticketNum.insert!{caller -> alph: mapEntryDeposit!()}()
+}
+
+TxScript buyTicketCool (lotteryContract: Lottery, amount: U256) {
+    let caller=callerAddress!()
+    lotteryContract.buyTicket{caller -> alph: amount}(amount)
+}
