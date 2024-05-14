@@ -1,0 +1,135 @@
+Contract Lottery(
+    ticketPrice: U256,
+    alphy: Address,
+    mapNum: U256,
+    mut time: U256,
+    mut lastLotteryId: U256,
+    mut lastTicketId: U256,
+    mut drawTimestamp: U256,
+    mut refundDepositTimestamp: U256,
+    mut winner: Address
+) {
+    mapping[U256, Address] ticketNum
+    mapping[Address, U256] winnersList
+
+    event TicketBought(from: Address, amount: U256)
+    event LastWinner(lastWinnerAdress: Address, prizeAmount: U256)
+    event PrizeClaimed(claimant: Address, amountClaimed: U256)
+    event EmergencyStopped(isStopped: Bool)
+    event DrawDone (isDone: Bool)
+    event LotteryFinished (isFinished: Bool)
+    event DepositRefund (isRefund:Bool)
+    event LotteyClose (beginAt: U256) 
+
+    enum ErrorCodes {                              
+        PrizeClaimUnavailable = 0
+    }
+
+//ID generation for lotteries and tickets
+
+    @using(updateFields = true, checkExternalCaller = false)
+    pub fn generateLotteryId() -> (U256) {                  
+        lastLotteryId = lastLotteryId + 1
+        return lastLotteryId
+    }
+
+    @using(updateFields = true, checkExternalCaller = false)
+    pub fn generateTicketId() -> (U256) {                  
+        lastTicketId = lastTicketId + 1
+        return lastTicketId
+    }
+    
+//buying tickets function
+
+    @using(preapprovedAssets = true, assetsInContract = true, updateFields = false, checkExternalCaller = false)
+    pub fn buyTicket() -> () {
+
+        let depositor = callerAddress! ()
+        let key = generateTicketId()
+        let value = callerAddress!()
+        ticketNum.insert!(depositor, key, value)
+
+        let caller = callerAddress! ()
+        let contractPortion = ticketPrice * 995 / 1000
+        let alphyPortion = ticketPrice * 5 / 1000
+        transferTokenToSelf!(caller, ALPH, contractPortion)
+        transferToken!(caller, alphy, ALPH, alphyPortion) 
+
+        emit TicketBought(caller, key)
+    }
+
+//pseudorandom function
+
+    fn random() -> U256 {
+        let seed = u256From32Byte!(blake2b!(toByteVec!(blockTarget!()) ++ toByteVec!(blockTimeStamp!())))
+        emit Debug(`random is ${seed}`)
+        return addModN!(0,seed, mapNum)
+    }
+
+//pickWinner function based on pseudorandomfunction
+
+    fn pickWinner() -> (Address) {
+        let winnerTicketId = random()
+        let winnerAddress=ticketNum[winnerTicketId]
+        let prizeAmount = lastTicketId * ticketPrice * 995 / 1000
+        winnersList.insert!(winnerAddress, winnerAddress, lastLotteryId)
+        return winnerAddress
+        emit LastWinner(winnerAddress, prizeAmount) 
+    }
+
+//winner can claim his prize
+
+    @using(preapprovedAssets = true, assetsInContract = true, checkExternalCaller = false)
+    pub fn claimPrize() -> () {
+        let caller = callerAddress!()
+
+        assert!(caller == winner, ErrorCodes.PrizeClaimUnavailable)
+
+        let prizeAmount = lastTicketId * ticketPrice * 995 / 1000
+        transferTokenFromSelf!(winner, ALPH, prizeAmount)
+        
+        emit PrizeClaimed(winner, prizeAmount)
+    }
+
+//all the participants can get their deposit
+
+    @using(preapprovedAssets = false, assetsInContract = false, updateFields = false, checkExternalCaller = false)
+    pub fn getBackDeposit() -> () {
+        let key = lastTicketId
+        let depositRecipient = callerAddress!()
+        ticketNum.remove!(depositRecipient, key)
+        emit DepositRefund(true)
+    }
+
+//Time fonction
+
+    @using(updateFields = true, checkExternalCaller = false)
+    pub fn beginLottery() -> () {
+        let currentTime=blockTimeStamp!()
+        if (currentTime >= time) {
+            lastLotteryId = generateLotteryId()
+            time = currentTime + 86400
+            drawTimestamp = currentTime + 82800
+        }
+    }
+
+    @using(updateFields = true, checkExternalCaller = false)
+    pub fn executeDraw() -> () {
+        let currentTime = blockTimeStamp!()
+        if (currentTime >= drawTimestamp){
+            winner = pickWinner()
+            drawTimestamp = time + 82800
+            emit DrawDone(true)
+        }
+    }
+
+    @using(updateFields = true, checkExternalCaller = false)
+    pub fn refundDeposit() -> () {
+        let currentTime = blockTimeStamp!()
+        if (currentTime >= refundDepositTimestamp){
+            getBackDeposit()
+            refundDepositTimestamp = time + 82800
+            emit DepositRefund(true)
+        }
+    }
+}
